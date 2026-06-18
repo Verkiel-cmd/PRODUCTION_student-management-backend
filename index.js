@@ -403,6 +403,9 @@ transporter.verify(function(error, success) {
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+
+
+//SENDER-OTP
 app.post('/send-otp', async (req, res) => {
     const { email } = req.body;
     
@@ -442,9 +445,19 @@ app.post('/send-otp', async (req, res) => {
 
         // Send email
         try {
-            const mailOptions = {
-                from: `"Student Management System" <${process.env.EMAIL_USER}>`,
-                to: email,
+            const apiResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+                method: 'POST',
+                headers: {
+                    'accept': 'application/json',
+                    'api-key': process.env.BREVO_API_KEY,
+                },
+                body: JSON.stringify({
+                    sender: {
+                        name: "Student Management System",
+                        email: process.env.SENDER_EMAIL
+                    
+                },
+                to: [{email: email}],
                 subject: 'Password Reset OTP',
                 text: `Your OTP for password reset is: ${otp}. It will expire in 10 minutes.`,
                 html: `
@@ -456,10 +469,17 @@ app.post('/send-otp', async (req, res) => {
                         <p>If you didn't request this, please ignore this email.</p>
                     </div>
                 `
-            };
+            })
+        });
+            
 
-            const info = await transporter.sendMail(mailOptions);
-            console.log('Email sent successfully:', info.messageId);
+            const responseData = await apiResponse.json();
+
+            if (!apiResponse.ok) {
+                throw new Error(responseData.message || 'Brevo API rejected the delivery payload.');
+            }
+
+            console.log('Email sent successfully via Brevo API:', responseData.messageId);
 
             res.json({ 
                 success: true, 
