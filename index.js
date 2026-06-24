@@ -462,7 +462,6 @@ app.post('/send-otp', async (req, res) => {
                     sender: {
                         name: "Student Management System",
                         email: process.env.SENDER_EMAIL
-                    
                 },
                 to: [{email: email}],
                 subject: 'Password Reset OTP',
