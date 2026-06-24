@@ -465,8 +465,8 @@ app.post('/send-otp', async (req, res) => {
                 },
                 to: [{email: email}],
                 subject: 'Password Reset OTP',
-                text: `Your OTP for password reset is: ${otp}. It will expire in 10 minutes.`,
-                html: `
+                textContent: `Your OTP for password reset is: ${otp}. It will expire in 10 minutes.`,
+                htmlContent: `
                     <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
                         <h2 style="color: #333;">Password Reset Request</h2>
                         <p>Your OTP for password reset is:</p>
