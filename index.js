@@ -124,14 +124,21 @@ app.post('/register', async (req, res) => {
             'SELECT * FROM users WHERE email = ? OR username = ?',
             [email, username]
         );
-        if (existingUsers.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: existingUsers[0].email === email
-                    ? 'Email already in use'
-                    : 'Username already exists'
-            });
-        }
+        
+if (existingUsers.length > 0) {
+    const emailExists = existingUsers.some(u => u.email === email);
+    const usernameExists = existingUsers.some(u => u.username === username);
+
+    if (emailExists) return res.status(400).json({ 
+        success: false, 
+        message: 'Email already in use' 
+    });
+    
+    if (usernameExists) return res.status(400).json({ 
+        success: false, 
+        message: 'Username already exists' 
+    });
+}
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
         const [result] = await dbPromise.query(
