@@ -121,13 +121,13 @@ app.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
     try {
         const [existingUsers] = await dbPromise.query(
-            'SELECT * FROM users WHERE email = ? OR username = ?',
+            'SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)',
             [email, username]
         );
         
 if (existingUsers.length > 0) {
-    const emailExists = existingUsers.some(u => u.email === email);
-    const usernameExists = existingUsers.some(u => u.username === username);
+    const emailExists = existingUsers.some(u => u.email.toLowerCase() === email.toLowerCase());
+    const usernameExists = existingUsers.some(u => u.username.toLowerCase() === username.toLowerCase());
 
     if (emailExists) return res.status(400).json({ 
         success: false, 
