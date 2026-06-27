@@ -147,6 +147,7 @@ if (existingUsers.length > 0) {
         );
         req.session.userId = result.insertId;
         req.session.username = username;
+        req.session.email = email;
         console.log('Before save:', req.session);
         // Change: Use a Promise to wait for the session to save
         await new Promise((resolve, reject) => {
@@ -197,6 +198,7 @@ app.post('/login', async (req, res) => {
         }
         req.session.userId = user.id;
         req.session.username = user.username;
+        req.session.email = email;
         console.log('Before save:', req.session);
         // Change: Use a Promise to wait for the session to save
         await new Promise((resolve, reject) => {
@@ -229,7 +231,8 @@ app.get('/auth/validate', (req, res) => {
             authenticated: true,
             user: {
                 id: req.session.userId,
-                username: req.session.username
+                username: req.session.username,
+                email: req.session.email
             }
         });
     } else {
@@ -296,6 +299,7 @@ app.post('/google-login', async (req, res) => {
                 // Set up session
                 req.session.userId = result.insertId;
                 req.session.username = username;
+                req.session.email = email;
                 
                 await new Promise((resolve, reject) => {
                     req.session.save(err => {
