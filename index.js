@@ -119,7 +119,6 @@ app.get('/', (req, res) => {
 // Registration
 app.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
-    console.log('Register body:', req.body);
     try {
         const [existingUsers] = await dbPromise.query(
             'SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)',
@@ -179,7 +178,6 @@ if (existingUsers.length > 0) {
 // Login
 app.post('/login', async (req, res) => {
     const { email, password } = req.body;
-    console.log('Login body:', req.body);
     try {
         const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
         if (users.length === 0) {
