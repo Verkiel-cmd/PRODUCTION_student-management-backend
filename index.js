@@ -2,13 +2,41 @@ import express from 'express';
 import mysql from 'mysql2';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
+import rateLimit from 'express-rate-limit';
 import session from 'express-session';
 import MySQLSession from 'express-mysql-session';
 import { OAuth2Client } from 'google-auth-library';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import config from './config.js';
+// import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
+// ─── express-validator ────────────────────────────────────────────
+// body()        → Defines validation rules for each request field
+//                   e.g. body('email').isEmail() checks if email is valid
+//                   Internally uses StandardValidation (don't import it directly)
+//
+// validationResult() → Collects all errors after body() checks run
+//                       Returns an object with .isEmpty() and .array()
+//
+// USAGE FLOW (example for POST /students):
+//   app.post('/students',
+//       body('name').notEmpty().withMessage('Name is required'),
+//       body('email').isEmail().withMessage('Invalid email'),
+//       (req, res) => {
+//           const errors = validationResult(req);
+//           if (!errors.isEmpty()) {
+//               return res.status(400).json({ errors: errors.array() });
+//           }
+//           // All valid — proceed to save to DB
+//       }
+//   );
+//
+// NOTE: Do NOT import StandardValidation — it is an internal class
+//       used by body() behind the scenes. Importing it directly
+//       may break when express-validator updates.
+// ──────────────────────────────────────────────────────────────────
+// import { body, validationResult } from 'express-validator';
 
 dotenv.config();
 
@@ -111,13 +139,78 @@ app.use(session({
     }
 }));
 
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 50,
+    message: { error: 'Too many requests, please try again later.'},
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+/* ------------------------------------------------
+   ⚠️  CORE SYSTEM LOGIC ⚠️
+   This block handles critical state management.
+   Unauthorized changes will cause immediate system failure.
+   ------------------------------------------------ */
+
+// Create users table if not exists "Frontlog"
+const createUserTableQuery = `
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  email VARCHAR(100) UNIQUE NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`;
+
+db.query(createUserTableQuery, (err) => {
+    if (err) console.error('Error creating users table:', err);
+});
+
+// Create studentawt table if not exists "ListStud"
+const createStudentawtTableQuery = `
+CREATE TABLE IF NOT EXISTS studentawt (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  email VARCHAR(100) NOT NULL,
+  phone VARCHAR(20) NOT NULL,
+  address VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`;
+
+
+db.query(createStudentawtTableQuery, (err) => {
+    if (err) console.error('Error creating studentawt table:', err);
+});
+
+// Create classkern table if not exists "Classes"
+const createClasskernTableQuery = `
+CREATE TABLE IF NOT EXISTS classkern (
+  classid INT AUTO_INCREMENT PRIMARY KEY,
+  classname VARCHAR(100) NOT NULL,
+  classteacher VARCHAR(100) NOT NULL,
+  studentlimit INT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`;
+
+
+db.query(createClasskernTableQuery, (err) => {
+    if (err) console.error('Error creating classkern table:', err);
+});
+
+/* ------------------------------------------------
+   ⚠️  CORE SYSTEM LOGIC ⚠️
+   This block handles critical state management.
+   Unauthorized changes will cause immediate system failure.
+   ================================================ */
+
 // --- Root Route ---
 app.get('/', (req, res) => {
     res.send('Welcome to the Student Management API!');
 });
 
 // Registration
-app.post('/register', async (req, res) => {
+app.post('/register', authLimiter, async (req, res) => {
     const { username, email, password } = req.body;
     try {
         const [existingUsers] = await dbPromise.query(
@@ -176,7 +269,7 @@ if (existingUsers.length > 0) {
     }
 });
 // Login
-app.post('/login', async (req, res) => {
+app.post('/login', authLimiter, async (req, res) => {
     const { email, password } = req.body;
     try {
         const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
@@ -223,6 +316,11 @@ app.post('/login', async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error. Please try again later.' });
     }
 });
+/* ------------------------------------------------
+   ⚠️  CORE SYSTEM LOGIC ⚠️
+   This block handles authenticated state management.
+   Unauthorized changes will cause immediate system failure.
+   ------------------------------------------------ */
 
 app.get('/auth/validate', (req, res) => {
     console.log('Session in /auth/validate:', req.session);
@@ -240,6 +338,11 @@ app.get('/auth/validate', (req, res) => {
     }
 });
 
+/* ------------------------------------------------
+   ⚠️  CORE SYSTEM LOGIC ⚠️
+   This block handles authenticated state management.
+   Unauthorized changes will cause immediate system failure.
+   ------------------------------------------------ */
 
 // Logout
 app.post('/logout', (req, res) => {
@@ -389,6 +492,79 @@ app.post('/check-username', async (req, res) => {
 // FORGOT PASSWORD / OTP ROUTES
 // ===================
 
+// ─── OTP STORAGE ──────────────────────────────────────────────────
+// try {
+    //
+    // ─── VARIABLES USED IN THIS BLOCK ──────────────────────────────
+    // otpStorage   → in-memory Map (line 495), stores OTPs and reset tokens
+    //                populated by /send-otp, modified by /verify-otp
+    // email        → req.body.email, the user's email from the frontend form
+    // resetToken   → req.body.resetToken, UUID string returned by /verify-otp
+    // stored       → the object inside otpStorage[email], contains { resetToken, expires }
+    // dbPromise    → mysql2 promise wrapper (line 83), lets us use async/await with MySQL
+    // users        → array of matching rows from the "users" table in MySQL
+    // bcrypt       → password hashing library (line 4), same one used in /register (line ~144)
+    // newPassword  → req.body.newPassword, the plaintext password from the frontend form
+    // hashedPassword → bcrypt-hashed version of newPassword (never stored as plain text)
+    // ────────────────────────────────────────────────────────────────
+
+    // Get the stored object for this email from the Map
+    // otpStorage is: Map { "alice@mail.com" → { resetToken: "uuid", expires: timestamp } }
+    //const stored = otpStorage.get(email);
+
+    // CHECK 1: Does resetToken exist?
+    // /verify-otp only puts resetToken in after OTP passes
+    // No resetToken = user skipped OTP verification = block
+    //if (stored?.resetToken) {
+
+        // CHECK 2: Does the resetToken match?
+        // /verify-otp generated it with crypto.randomUUID()
+        // Frontend received it, is sending it back in req.body.resetToken
+        // Mismatch = forged request = block
+        //if (stored.resetToken !== resetToken) {
+            //return res.status(403).json({ success: false, message: 'Invalid reset token' });
+        //}
+
+        // CHECK 3: Has it expired? (5 min window set by /verify-otp)
+        // stored.expires = timestamp set in /verify-otp
+        // Date.now() = current time in milliseconds
+        // If current time > expiry → too late → delete and block
+        //if (stored.expires < Date.now()) {
+            //otpStorage.delete(email); // wipe { resetToken, expires } from the Map
+            //return res.status(403).json({ success: false, message: 'Reset token expired. Please try again, were sorry.' });
+        //}
+
+        // ALL PASSED — now actually reset the password
+
+        // Query MySQL: find the user in the "users" table (created at line ~130)
+        // dbPromise.query() returns [rows, fields] — we only need rows
+        //const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
+        //if (users.length === 0) {
+            //return res.status(404).json({ success: false, message: 'User not found' });
+        //}
+
+        // Hash the new password with bcrypt (10 salt rounds)
+        // This is the same bcrypt.hash() used during /register (line ~144)
+        //const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update MySQL: overwrite the old password hash with the new one
+        // "users" table → password column → for the row matching this email
+        //await dbPromise.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, email]);
+
+        // Cleanup: remove the entire entry from otpStorage
+        // { resetToken, expires } deleted — can't reuse this token
+        //otpStorage.delete(email);
+
+        //res.json({ success: true, message: 'Password reset successfully', email: email });
+
+    //} else {
+        // No resetToken stored → user called /reset-password without doing /verify-otp
+        //return res.status(403).json({ success: false, message: 'OTP verification required first' });
+    //}
+    // } catch (error) {
+    //     console.error('Password reset error:', error);
+    //     res.status(500).json({ success: false, message: 'Error resetting password. Please try again.' });
+    // }
 const otpStorage = new Map();
 
 const transporter = nodemailer.createTransport({
@@ -413,8 +589,6 @@ transporter.verify(function(error, success) {
 });
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-
 
 //SENDER-OTP
 app.post('/send-otp', async (req, res) => {
@@ -483,7 +657,6 @@ app.post('/send-otp', async (req, res) => {
             })
         });
             
-
             const responseData = await apiResponse.json();
 
             if (!apiResponse.ok) {
@@ -525,8 +698,81 @@ app.post('/send-otp', async (req, res) => {
     }
 });
 
+// try {
+    //
+    // ─── VARIABLES USED IN THIS BLOCK ──────────────────────────────
+    // otpStorage   → in-memory Map (line 495), stores OTPs and reset tokens
+    //                populated by /send-otp, modified by /verify-otp
+    // email        → req.body.email, the user's email from the frontend form
+    // resetToken   → req.body.resetToken, UUID string returned by /verify-otp
+    // stored       → the object inside otpStorage[email], contains { resetToken, expires }
+    // dbPromise    → mysql2 promise wrapper (line 83), lets us use async/await with MySQL
+    // users        → array of matching rows from the "users" table in MySQL
+    // bcrypt       → password hashing library (line 4), same one used in /register (line ~144)
+    // newPassword  → req.body.newPassword, the plaintext password from the frontend form
+    // hashedPassword → bcrypt-hashed version of newPassword (never stored as plain text)
+    // ────────────────────────────────────────────────────────────────
+
+    // Get the stored object for this email from the Map
+    // otpStorage is: Map { "alice@mail.com" → { resetToken: "uuid", expires: timestamp } }
+    //const stored = otpStorage.get(email);
+
+    // CHECK 1: Does resetToken exist?
+    // /verify-otp only puts resetToken in after OTP passes
+    // No resetToken = user skipped OTP verification = block
+    //if (stored?.resetToken) {
+
+        // CHECK 2: Does the resetToken match?
+        // /verify-otp generated it with crypto.randomUUID()
+        // Frontend received it, is sending it back in req.body.resetToken
+        // Mismatch = forged request = block
+        //if (stored.resetToken !== resetToken) {
+            //return res.status(403).json({ success: false, message: 'Invalid reset token' });
+        //}
+
+        // CHECK 3: Has it expired? (5 min window set by /verify-otp)
+        // stored.expires = timestamp set in /verify-otp
+        // Date.now() = current time in milliseconds
+        // If current time > expiry → too late → delete and block
+        //if (stored.expires < Date.now()) {
+            //otpStorage.delete(email); // wipe { resetToken, expires } from the Map
+            //return res.status(403).json({ success: false, message: 'Reset token expired. Please try again, were sorry.' });
+        //}
+
+        // ALL PASSED — now actually reset the password
+
+        // Query MySQL: find the user in the "users" table (created at line ~130)
+        // dbPromise.query() returns [rows, fields] — we only need rows
+        //const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
+        //if (users.length === 0) {
+            //return res.status(404).json({ success: false, message: 'User not found' });
+        //}
+
+        // Hash the new password with bcrypt (10 salt rounds)
+        // This is the same bcrypt.hash() used during /register (line ~144)
+        //const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update MySQL: overwrite the old password hash with the new one
+        // "users" table → password column → for the row matching this email
+        //await dbPromise.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, email]);
+
+        // Cleanup: remove the entire entry from otpStorage
+        // { resetToken, expires } deleted — can't reuse this token
+        //otpStorage.delete(email);
+
+        //res.json({ success: true, message: 'Password reset successfully', email: email });
+
+    //} else {
+        // No resetToken stored → user called /reset-password without doing /verify-otp
+        //return res.status(403).json({ success: false, message: 'OTP verification required first' });
+    //}
+    // } catch (error) {
+    //     console.error('Password reset error:', error);
+    //     res.status(500).json({ success: false, message: 'Error resetting password. Please try again.' });
+    // }
+
 app.post('/verify-otp', async (req, res) => {
-    const { email, otp } = req.body;
+    const { email, otp, resetToken } = req.body;
     
     if (!email || !otp) {
         return res.status(400).json({ 
@@ -536,6 +782,29 @@ app.post('/verify-otp', async (req, res) => {
     }
 
     try {
+
+        //CHECKING THE OTP FIRST
+        const stored = otpStorage.get(email);
+        if (!stored?.resetToken) {
+            return res.status(403).json({
+                success: false,
+                message: 'OTP verification required first'
+            });
+        }
+        if(stored.resetToken !== resetToken) {
+            return res.status(403).json({
+                success: false,
+                message: 'Invalid reset token'
+            });
+        }
+        if (stored.expires < Date.now()) {
+            otpStorage.delete(email);
+            return res.status(403).json({
+                success: false,
+                message: 'Reset token expired. Please try again, were sorry.'
+            });
+        }
+
         // First check if user exists
         const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
         if (users.length === 0) {
@@ -759,23 +1028,6 @@ app.delete('/delete-class/:id', (req, res) => {
     });
 });
 
-
-// Create classkern table if not exists
-const createClasskernTableQuery = `
-CREATE TABLE IF NOT EXISTS classkern (
-  classid INT AUTO_INCREMENT PRIMARY KEY,
-  classname VARCHAR(100) NOT NULL,
-  classteacher VARCHAR(100) NOT NULL,
-  studentlimit INT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)`;
-
-
-db.query(createClasskernTableQuery, (err) => {
-    if (err) console.error('Error creating classkern table:', err);
-});
-
-
 // ===================
 // STUDENT ROUTES
 // ===================
@@ -890,43 +1142,9 @@ app.delete('/students/:id', (req, res) => {
     });
 });
 
-
-// Create studentawt table if not exists
-const createStudentawtTableQuery = `
-CREATE TABLE IF NOT EXISTS studentawt (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  email VARCHAR(100) NOT NULL,
-  phone VARCHAR(20) NOT NULL,
-  address VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)`;
-
-
-db.query(createStudentawtTableQuery, (err) => {
-    if (err) console.error('Error creating studentawt table:', err);
-});
-
-
 // ===================
 // AUTH & USER ROUTES
 // ===================
-
-
-// Create users table if not exists
-const createUserTableQuery = `
-CREATE TABLE IF NOT EXISTS users (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  username VARCHAR(50) UNIQUE NOT NULL,
-  email VARCHAR(100) UNIQUE NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)`;
-
-db.query(createUserTableQuery, (err) => {
-    if (err) console.error('Error creating users table:', err);
-});
-
 
 // Get user details
 app.get('/api/user-details', async (req, res) => {
