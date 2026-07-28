@@ -10,7 +10,7 @@ import nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
 import dotenv from 'dotenv';
 import config from './config.js';
-import { attempt } from 'lodash';
+//import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
 // ─── express-validator ────────────────────────────────────────────
