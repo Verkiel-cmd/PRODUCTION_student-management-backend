@@ -38,6 +38,77 @@ import config from './config.js';
 // ──────────────────────────────────────────────────────────────────
 // import { body, validationResult } from 'express-validator';
 
+
+
+// ─────────────────────────────────────────────────────────────────────
+// ─── Security Headers & CORS Preflight Middleware ────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// This middleware runs on EVERY incoming request (before routes) and
+// attaches security-related HTTP response headers. It acts as the
+// first line of defense against common web vulnerabilities.
+//
+// 1. CONTENT SECURITY POLICY (CSP)
+//    Restricts which resources the browser is allowed to load/execute.
+//    Prevents XSS (Cross-Site Scripting) and data-injection attacks.
+//
+//    • default-src 'self'
+//      Fallback: only allow resources from this server's own origin.
+//
+//    • script-src 'self' https://accounts.google.com https://apis.google.com
+//      Allow JavaScript from:
+//        - 'self'               → your own backend/static files
+//        - accounts.google.com  → Google Sign-In popup/redirect scripts
+//        - apis.google.com      → Google API client library (gapi)
+//
+//    • frame-src https://accounts.google.com
+//      Allow the Google OAuth consent screen to be embedded in an iframe
+//      (Google uses this during the sign-in flow).
+//
+//    • connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com
+//      Allow XHR/fetch/WebSocket connections to:
+//        - 'self'                   → your own API endpoints
+//        - accounts.google.com      → token info / OpenID Connect
+//        - oauth2.googleapis.com    → OAuth2 token exchange endpoint
+//          (used when exchanging authorization code for access token)
+//
+// 2. ACCESS-CONTROL (CORS) HEADERS
+//    • Access-Control-Allow-Origin → only the deployed Netlify frontend
+//      can make credentialed (cookie-bearing) requests to this API.
+//    • Access-Control-Allow-Credentials → tells the browser it's OK to
+//      include cookies/auth headers in cross-origin requests from the
+//      allowed origin above.
+//
+//    NOTE: The full CORS configuration (preflight handling, allowed
+//    methods, allowed headers) is handled by the `cors` middleware
+//    below (line 67). These headers here serve as an additional
+//    explicit safeguard.
+//
+// 3. X-CONTENT-TYPE-OPTIONS: nosniff
+//    Prevents the browser from MIME-sniffing a response away from the
+//    declared Content-Type. Stops the browser from treating a
+//    text/html response as an executable script, for example.
+//
+// 4. X-FRAME-OPTIONS: SAMEORIGIN
+//    Prevents the page from being embedded in an <iframe> on a
+//    different origin, blocking clickjacking attacks. Same-origin
+//    iframes are allowed (needed for Google OAuth popup flow).
+//
+// 5. X-XSS-PROTECTION: 1; mode=block
+//    Enables the browser's legacy XSS auditor (Chrome, Edge, Safari).
+//    When a suspected reflected XSS attack is detected, the browser
+//    will block the entire page instead of just sanitizing the payload.
+//    Note: Modern browsers are phasing this out in favor of CSP, but
+//    it still provides a defense-in-depth layer for older browsers.
+//
+// 6. COOP / COEP (commented out)
+//    Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy are
+//    disabled because they break Google OAuth popups (the popup opens
+//    a cross-origin window, and COOP 'same-origin' would sever the
+//    reference). Enable these only if you don't use cross-origin
+//    popups or if you can set COOP to 'unsafe-allow-outgoing' instead.
+//
+// ─────────────────────────────────────────────────────────────────────
+
 dotenv.config();
 
 const app = express();
