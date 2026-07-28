@@ -7,8 +7,10 @@ import session from 'express-session';
 import MySQLSession from 'express-mysql-session';
 import { OAuth2Client } from 'google-auth-library';
 import nodemailer from 'nodemailer';
+import { randomUUID } from 'crypto';
 import dotenv from 'dotenv';
 import config from './config.js';
+import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
 // ─── express-validator ────────────────────────────────────────────
@@ -843,7 +845,7 @@ app.post('/send-otp', async (req, res) => {
     // }
 
 app.post('/verify-otp', async (req, res) => {
-    const { email, otp, resetToken } = req.body;
+    const { email, otp } = req.body;
     
     if (!email || !otp) {
         return res.status(400).json({ 
@@ -853,6 +855,64 @@ app.post('/verify-otp', async (req, res) => {
     }
 
     try {
+
+        const storedOTP = otpStorage.get(email);
+        if (!storedOTP) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'No OTP found for this email. Please request a new OTP.' 
+            });
+        }
+
+        if (storedOTP.expires < Date.now()) {
+            otpStorage.delete(email);
+            return res.status(400).json({ 
+                success: false, 
+                message: 'OTP has expired. Please request a new one.' 
+            });
+        }
+
+        if (storedOTP.otp !== otp) {
+            storedOTP.attempts = (storedOTP.attempts || 0) + 1;
+            otpStorage.set(email, storedOTP);
+
+            if (storedOTP.attempts >= 3) {
+                otpStorage.delete(email);
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Too many failed attempts. Please request a new OTP.' 
+                });
+            }
+
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid OTP. Please try again.' 
+            });
+        }
+
+        const resetToken = randomUUID();
+        otpStorage.set(email, {
+            resetToken,
+            expires: Date.now() + 5 * 60 * 1000,
+            attempts: 0
+        });
+        res.json({
+            success: true,
+            message: 'OTP verified successfully',
+            email: email,
+            resetToken: resetToken
+        });
+    } catch (error) {
+         console.error('OTP verification error:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: 'Error verifying OTP. Please try again.',
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+    });
+
+ /**/     /*try {
 
         //CHECKING THE OTP FIRST
         const stored = otpStorage.get(email);
@@ -874,10 +934,10 @@ app.post('/verify-otp', async (req, res) => {
                 success: false,
                 message: 'Reset token expired. Please try again, were sorry.'
             });
-        }
+        }*/
 
         // First check if user exists
-        const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
+   /*  const [users] = await dbPromise.query('SELECT * FROM users WHERE email = ?', [email]);
         if (users.length === 0) {
             return res.status(404).json({ 
                 success: false, 
@@ -919,28 +979,37 @@ app.post('/verify-otp', async (req, res) => {
                 message: 'Invalid OTP. Please try again.' 
             });
         }
+        
 
-        // OTP is valid
-        otpStorage.delete(email);
-        res.json({ 
-            success: true, 
+        // OTP is valid - phase down ( no security risk )
+        //otpStorage.delete(email);
+        //res.json({ 
+            //success: true, 
+            //message: 'OTP verified successfully',
+            //email: email
+        //});
+
+        //Using "randomUUID", it secures the OTP sender and only allowed whoc an send it
+        const resetToken = randomUUID();
+        otpStorage.set(email, {
+            resetToken,
+            expires: Date.now() + 5 * 60 * 1000,
+            attempt: 0
+        });
+        res.json({
+            success: true,
             message: 'OTP verified successfully',
-            email: email
+            email: email,
+            resetToken: resetToken
         });
-    } catch (error) {
-        console.error('OTP verification error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Error verifying OTP. Please try again.',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-});
+
+       */
+    
 
 app.post('/reset-password', async (req, res) => {
-    const { email, newPassword } = req.body;
+    const { email, newPassword, resetToken } = req.body;
     
-    if (!email || !newPassword) {
+    if (!email || !newPassword || !resetToken) {
         return res.status(400).json({ 
             success: false, 
             message: 'Email and new password are required' 
@@ -957,6 +1026,15 @@ app.post('/reset-password', async (req, res) => {
             });
         }
 
+        const stored = otpStorage.get(email);
+        if (!stored?.resetToken || stored.resetToken !== resetToken) {
+            return res.status(403).json({ success: false, message: 'Invalid reset token' });
+        }
+        if (stored.expires < Date.now()) {
+            otpStorage.delete(email);
+            return res.status(403).json({ success: false, message: 'Reset token expired' });
+        }
+
         // Hash the new password
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
@@ -966,6 +1044,7 @@ app.post('/reset-password', async (req, res) => {
             [hashedPassword, email]
         );
 
+        otpStorage.delete(email);
         res.json({ 
             success: true, 
             message: 'Password reset successfully',
