@@ -10,7 +10,8 @@
     "server3": "node class.js",
     "server4": "node forgotpassword.js",
     "start-all": "concurrently \"npm run server1\" \"npm run server2\" \"npm run server3\" \"npm run server4\"",
-    "postinstall": "node -e \"if(process.platform!=='win32'){require('child_process').execSync('chmod +x node_modules/.bin/* && chmod +x *.js',{stdio:'inherit'})}\""
+    "postinstall": "node -e \"if(process.platform!=='win32'){require('child_process').execSync('chmod +x node_modules/.bin/* && chmod +x *.js',{stdio:'inherit'})}\"",
+    "test": "jest"
   },
   "keywords": [],
   "author": "",
