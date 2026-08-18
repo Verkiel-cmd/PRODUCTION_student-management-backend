@@ -264,7 +264,8 @@ CREATE TABLE IF NOT EXISTS users (
 )`;
 
 //profile_picture column if it doesn't exist
-db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture VARCHAR(500) DEFAULT NULL', (err) => {
+// AFTER:
+db.query('ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500) DEFAULT NULL', (err) => {
     if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('Error adding profile_picture column:', err);
 });
 
