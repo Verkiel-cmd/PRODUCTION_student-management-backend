@@ -10,6 +10,9 @@ import nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
 import dotenv from 'dotenv';
 import config from './config.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import multer from 'multer';
 //import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
@@ -159,6 +162,29 @@ app.use(cors({
 
 app.use(express.json());
 
+// --- Multer config for profile picture uploads ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, path.join(__dirname, 'uploads')),
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        cb(null, `user-${req.session.userId}-${Date.now()}${ext}`);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: { fileSize: 3 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        cb(null, allowed.includes(file.mimetype));
+    }
+});
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // --- Middleware ---
 app.use((req, res, next) => {
     console.log(`Request URL: ${req.url}`);
@@ -233,8 +259,14 @@ CREATE TABLE IF NOT EXISTS users (
   username VARCHAR(50) UNIQUE NOT NULL,
   email VARCHAR(100) UNIQUE NOT NULL,
   password VARCHAR(255) NOT NULL,
+  profile_picture VARCHAR(500) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`;
+
+//profile_picture column if it doesn't exist
+db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture VARCHAR(500) DEFAULT NULL', (err) => {
+    if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('Error adding profile_picture column:', err);
+});
 
 db.query(createUserTableQuery, (err) => {
     if (err) console.error('Error creating users table:', err);
@@ -558,6 +590,50 @@ app.post('/check-username', async (req, res) => {
         }
     } catch (error) {
         res.status(500).json({ exists: false, message: 'Server error' });
+    }
+});
+
+// PUT /update-username
+app.put('/update-username', async (req, res) => {
+    if (!req.session || !req.session.userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    const { username } = req.body;
+    if (!username || username.trim().length < 3) {
+        return res.status(400).json({ success: false, message: 'Username must be at least 3 characters' });
+    }
+    try {
+        const [existing] = await dbPromise.query(
+            'SELECT id FROM users WHERE username = ? AND id != ?',
+            [username.trim(), req.session.userId]
+        );
+        if (existing.length > 0) {
+            return res.status(409).json({ success: false, message: 'Username already taken' });
+        }
+        await dbPromise.query('UPDATE users SET username = ? WHERE id = ?', [username.trim(), req.session.userId]);
+        req.session.username = username.trim();
+        res.json({ success: true, message: 'Username updated' });
+    } catch (error) {
+        console.error('Username update error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// POST /upload-profile-picture
+app.post('/upload-profile-picture', upload.single('profilePicture'), async (req, res) => {
+    if (!req.session || !req.session.userId) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    try {
+        const pictureUrl = `/uploads/${req.file.filename}`;
+        await dbPromise.query('UPDATE users SET profile_picture = ? WHERE id = ?', [pictureUrl, req.session.userId]);
+        res.json({ success: true, message: 'Profile picture updated', pictureUrl });
+    } catch (error) {
+        console.error('Picture upload error:', error);
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
@@ -1306,11 +1382,14 @@ app.get('/api/user-details', async (req, res) => {
         if (!Number.isInteger(userId) || userId <= 0) {
             return res.status(400).json({ success: false, message: 'Invalid session data' });
         }
-        const [rows] = await dbPromise.query('SELECT username FROM users WHERE id = ?', [userId]);
+        //const [rows] = await dbPromise.query('SELECT username FROM users WHERE id = ?', [userId]);
+        //FOR PROFILE PICTURE FUNCTION
+        const [rows] = await dbPromise.query('SELECT username, profile_picture FROM users WHERE id = ?', [userId]);
         if (rows.length === 0) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
-        res.json({ success: true, user: { username: rows[0].username } });
+        //WITH PROFILE PICTURE FUNCTION
+        res.json({ success: true, user: { username: rows[0].username, profile_picture: rows[0].profile_picture, } });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
