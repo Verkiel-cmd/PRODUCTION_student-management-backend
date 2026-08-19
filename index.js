@@ -12,7 +12,8 @@ import dotenv from 'dotenv';
 import config from './config.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import multer from 'multer';
+//import multer from 'multer';
+import { upload } from './cloudinary.js';
 //import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
@@ -163,27 +164,29 @@ app.use(cors({
 app.use(express.json());
 
 // --- Multer config for profile picture uploads ---
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+//const __filename = fileURLToPath(import.meta.url);
+//const __dirname = path.dirname(__filename);
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, path.join(__dirname, 'uploads')),
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, `user-${req.session.userId}-${Date.now()}${ext}`);
-    }
-});
+//const storage = multer.diskStorage({
+    //destination: (req, file, cb) => cb(null, path.join(__dirname, 'uploads')),
+    //filename: (req, file, cb) => {
+        //const ext = path.extname(file.originalname);
+        //cb(null, `user-${req.session.userId}-${Date.now()}${ext}`);
+    //}
+//});
 
-const upload = multer({
-    storage,
-    limits: { fileSize: 3 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-        cb(null, allowed.includes(file.mimetype));
-    }
-});
+//UNUSED ELEMENTS
 
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+//const upload = multer({
+    //storage,
+    //limits: { fileSize: 3 * 1024 * 1024 },
+    //fileFilter: (req, file, cb) => {
+        //const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        //cb(null, allowed.includes(file.mimetype));
+    //}
+//});
+
+//app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- Middleware ---
 app.use((req, res, next) => {
@@ -629,7 +632,7 @@ app.post('/upload-profile-picture', upload.single('profilePicture'), async (req,
         return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
     try {
-        const pictureUrl = `/uploads/${req.file.filename}`;
+        const pictureUrl = req.file.path;
         await dbPromise.query('UPDATE users SET profile_picture = ? WHERE id = ?', [pictureUrl, req.session.userId]);
         res.json({ success: true, message: 'Profile picture updated', pictureUrl });
     } catch (error) {
