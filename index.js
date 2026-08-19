@@ -9,7 +9,7 @@ import { OAuth2Client } from 'google-auth-library';
 import nodemailer from 'nodemailer';
 import { randomUUID } from 'crypto';
 import dotenv from 'dotenv';
-import config from './config.js';
+//import config from './config.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
 //import multer from 'multer';
