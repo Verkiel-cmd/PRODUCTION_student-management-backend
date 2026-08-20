@@ -200,11 +200,11 @@ app.use((req, res, next) => {
 
 // --- MySQL Connection ---
 const db = mysql.createPool({
-    host: config.DB_HOST,
-    user: config.DB_USER,
-    password: config.DB_PASSWORD,
-    database: config.DB_NAME,
-    port: config.MYSQLPORT || process.env.MYSQLPORT || 53382,
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.MYSQLPORT || process.env.MYSQLPORT || 53382,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
@@ -214,11 +214,11 @@ const dbPromise = db.promise();
 // --- Session Store ---
 const MySQLStore = MySQLSession(session);
 const sessionStore = new MySQLStore({
-    host: config.DB_HOST,
-    user: config.DB_USER,
-    password: config.DB_PASSWORD,
-    database: config.DB_NAME,
-    port: config.MYSQLPORT || process.env.MYSQLPORT || 53382,
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.MYSQLPORT || process.env.MYSQLPORT || 53382,
     clearExpired: true,
     checkExpirationInterval: 900000,
     expiration: 86400000,
