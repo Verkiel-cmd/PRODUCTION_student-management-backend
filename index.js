@@ -229,12 +229,12 @@ app.set('trust proxy', 1);
 
 app.use(session({
     name: 'user_sid',
-    secret: config.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     store: sessionStore,
     cookie: {
-        secure: config.NODE_ENV === 'production',
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: 'none',
         maxAge: 1000 * 60 * 60 * 24
@@ -478,10 +478,10 @@ app.post('/google-login', async (req, res) => {
     }
 
     try {
-        const client = new OAuth2Client(config.GOOGLE_CLIENT_ID);
+        const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
         const ticket = await client.verifyIdToken({
             idToken: token,
-            audience: config.GOOGLE_CLIENT_ID,
+            audience: process.env.GOOGLE_CLIENT_ID,
         });
         const payload = ticket.getPayload();
         
