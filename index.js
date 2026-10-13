@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 //import multer from 'multer';
 import { upload } from './cloudinary.js';
+import { requireAdmin } from './filerole-middleware.js';
 //import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
@@ -272,6 +273,10 @@ db.query('ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500) DEFAULT NULL
     if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('Error adding profile_picture column:', err);
 });
 
+db.query('ALTER TABLE users ADD COLUMN role ENUM("user","admin") NOT NULL DEFAULT "user"', (err) => {
+    if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('role:', err);
+});
+
 db.query(createUserTableQuery, (err) => {
     if (err) console.error('Error creating users table:', err);
 });
@@ -370,6 +375,7 @@ if (existingUsers.length > 0) {
             userId: newUser.id,
             username: newUser.username,
             email: newUser.email,
+            role: newUser.role,
             redirectUrl: '/Student_lists/ListStud'
 });
     } catch (error) {
@@ -418,6 +424,7 @@ app.post('/login', authLimiter, async (req, res) => {
             message: 'Login successful',
             userId: user.id,
             username: user.username,
+            role: user.role,
             redirectUrl: '/Student_lists/ListStud'
         });
     } catch (error) {
@@ -431,7 +438,7 @@ app.post('/login', authLimiter, async (req, res) => {
    Unauthorized changes will cause immediate system failure.
    ------------------------------------------------ */
 
-app.get('/auth/validate', (req, res) => {
+/*app.get('/auth/validate', (req, res) => {
     console.log('Session in /auth/validate:', req.session);
     if (req.session && req.session.userId) {
         return res.status(200).json({
@@ -445,6 +452,22 @@ app.get('/auth/validate', (req, res) => {
     } else {
         return res.status(200).json({ authenticated: false });
     }
+});*/
+
+app.get('/auth/validate', async (req, res) => {
+    if (!req.session?.userId) return res.json({ 
+        authenticated: false, 
+        user: null 
+    });
+    const [rows] = await dbPromise.query(
+        'SELECT id, username, email, role FROM users WHERE id = ?', [req.session.userId]);
+    if (!rows.length) return res.json({ 
+        authenticated: false, 
+        user: null 
+    });
+    res.json({ 
+        authenticated: true, user: rows[0] 
+    });
 });
 
 /* ------------------------------------------------
@@ -526,6 +549,7 @@ app.post('/google-login', async (req, res) => {
                     userId: result.insertId,
                     username: username,
                     email: email,
+                    role: 'user',
                     picture: picture,
                     redirectUrl: '/Student_lists/ListStud'
                 });
@@ -548,6 +572,7 @@ app.post('/google-login', async (req, res) => {
                     userId: user.id,
                     username: user.username,
                     email: user.email,
+                    role: user.role,
                     picture: picture,
                     redirectUrl: '/Student_lists/ListStud'
                 });
@@ -1177,7 +1202,7 @@ app.get('/get-classes', (req, res) => {
 });
 
 // Create a class
-app.post('/add-class', (req, res) => {
+app.post('/add-class', requireAdmin, (req, res) => {
     const { classname, classteacher, studentlimit } = req.body;
     if (!classname?.trim() || !classteacher?.trim() || !studentlimit) {
         return res.status(400).json({ error: 'All fields are required' });
@@ -1204,7 +1229,7 @@ app.post('/add-class', (req, res) => {
 });
 
 // Edit class
-app.put('/edit-class/:id', (req, res) => {
+app.put('/edit-class/:id', requireAdmin, (req, res) => {
     const { id } = req.params;
     const { classname, classteacher, studentlimit } = req.body;
     if (!id || isNaN(parseInt(id))) return res.status(400).json({ error: 'Invalid class ID' });
@@ -1247,7 +1272,7 @@ app.put('/edit-class/:id', (req, res) => {
 });
 
 // Delete class
-app.delete('/delete-class/:id', (req, res) => {
+app.delete('/delete-class/:id', requireAdmin, (req, res) => {
     const { id } = req.params;
     if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
     const query = 'DELETE FROM classkern WHERE classid = ?';
@@ -1292,7 +1317,7 @@ app.get('/students/:id', (req, res) => {
 });
 
 // Create student
-app.post('/students', (req, res) => {
+app.post('/students', requireAdmin, (req, res) => {
     const { name, email, phone, address } = req.body;
     if (!name || !email || !phone || !address) {
         return res.status(400).json({ message: 'All fields are required' });
@@ -1308,7 +1333,7 @@ app.post('/students', (req, res) => {
 });
 
 // Update student
-app.put('/students/:id', (req, res) => {
+app.put('/students/:id', requireAdmin, (req, res) => {
     const id = req.params.id;
     const { name, email, phone, address } = req.body;
     if (!name || !email || !phone || !address) {
@@ -1363,7 +1388,7 @@ app.put('/students/:id', (req, res) => {
 });
 
 // Delete student
-app.delete('/students/:id', (req, res) => {
+app.delete('/students/:id', requireAdmin, (req, res) => {
     const id = req.params.id;
     const sql = 'DELETE FROM studentawt WHERE id = ?';
     db.query(sql, [id], (err) => {
@@ -1388,12 +1413,12 @@ app.get('/api/user-details', async (req, res) => {
         }
         //const [rows] = await dbPromise.query('SELECT username FROM users WHERE id = ?', [userId]);
         //FOR PROFILE PICTURE FUNCTION
-        const [rows] = await dbPromise.query('SELECT username, profile_picture FROM users WHERE id = ?', [userId]);
+        const [rows] = await dbPromise.query('SELECT username, profile_picture, role FROM users WHERE id = ?', [userId]);
         if (rows.length === 0) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
         //WITH PROFILE PICTURE FUNCTION
-        res.json({ success: true, user: { username: rows[0].username, profile_picture: rows[0].profile_picture, } });
+        res.json({ success: true, user: { username: rows[0].username, profile_picture: rows[0].profile_picture, role: rows[0].role } });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
