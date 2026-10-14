@@ -278,6 +278,11 @@ db.query('ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DE
     else console.log('role column ensured');
 });
 
+// Add foreign key (optional, for integrity)
+db.query('ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL', (err) => {
+    if (err && err.code !== 'ER_CANNOT_ADD_FOREIGN') console.error('fk_invited_by:', err);
+});
+
 db.query(createUserTableQuery, (err) => {
     if (err) console.error('Error creating users table:', err);
 });
@@ -314,6 +319,79 @@ db.query(createClasskernTableQuery, (err) => {
 });
 
 
+
+
+// ──────────────── SUPER ADMIN PANEL ENDPOINTS ────────────────
+
+// GET /super-admin/admins - List all admins with inviter info
+app.get('/super-admin/admins', requireAdmin, async (req, res) => {
+    const requesterId = req.session.userId;
+    
+    // Verify super admin
+    const [requester] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ?', [requesterId]);
+    if (requester[0]?.invited_by) {
+        return res.status(403).json({ success: false, message: 'Super admin only' });
+    }
+    
+    try {
+        const [admins] = await dbPromise.query(`
+            SELECT 
+                u.id, u.username, u.email, u.role, u.created_at,
+                inviter.username as invited_by_username,
+                inviter.email as invited_by_email
+            FROM users u
+            LEFT JOIN users inviter ON u.invited_by = inviter.id
+            WHERE u.role = 'admin'
+            ORDER BY u.created_at DESC
+        `);
+        
+        res.json({ success: true, admins });
+    } catch (e) {
+        console.error('List admins error:', e);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// POST /super-admin/revoke/:id - Revoke admin status (super admin only)
+app.post('/super-admin/revoke/:id', requireAdmin, async (req, res) => {
+    const requesterId = req.session.userId;
+    const targetId = parseInt(req.params.id);
+    
+    // Verify super admin
+    const [requester] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ?', [requesterId]);
+    if (requester[0]?.invited_by) {
+        return res.status(403).json({ success: false, message: 'Super admin only' });
+    }
+    
+    // Prevent self-revoke
+    if (targetId === requesterId) {
+        return res.status(400).json({ success: false, message: 'Cannot revoke yourself' });
+    }
+    
+    // Verify target is sub-admin (invited by requester)
+    const [target] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ? AND role = "admin"', [targetId]);
+    if (!target.length) {
+        return res.status(404).json({ success: false, message: 'Admin not found' });
+    }
+    if (target[0].invited_by !== requesterId) {
+        return res.status(403).json({ success: false, message: 'Can only revoke admins you invited' });
+    }
+    
+    try {
+        await dbPromise.query('UPDATE users SET role = "user", invited_by = NULL WHERE id = ?', [targetId]);
+        res.json({ success: true, message: 'Admin revoked successfully' });
+    } catch (e) {
+        console.error('Revoke admin error:', e);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// ────────────────────────────────────────────────────────────
+
+
+
+
+
 /* ------------------------------------------------
    ⚠️  CORE SYSTEM LOGIC ⚠️
    This block handles critical state management.
@@ -322,7 +400,20 @@ db.query(createClasskernTableQuery, (err) => {
 
 app.post('/admin/invite', requireAdmin, authLimiter, async (req, res) => {
     const { username, email, password } = req.body;
+    const inviterId = req.session.userId; // Current admin's ID
     
+    // Check if inviter is SUPER ADMIN (first admin or has no inviter)
+    const [inviter] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ?', [inviterId]);
+    const isSuperAdmin = !inviter[0]?.invited_by; // No inviter = super admin
+    
+    if (!isSuperAdmin) {
+        return res.status(403).json({ 
+            success: false, 
+            message: 'Only super admin can invite new admins' 
+        });
+    }
+    
+    // ... rest of validation (same as before)
     if (!username?.trim() || !email?.trim() || !password) {
         return res.status(400).json({ success: false, message: 'All fields required' });
     }
@@ -345,20 +436,35 @@ app.post('/admin/invite', requireAdmin, authLimiter, async (req, res) => {
         
         const hashedPassword = await bcrypt.hash(password, 10);
         const [result] = await dbPromise.query(
-            'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, "admin")',
-            [username.trim(), email.trim().toLowerCase(), hashedPassword]
+            'INSERT INTO users (username, email, password, role, invited_by) VALUES (?, ?, ?, "admin", ?)',
+            [username.trim(), email.trim().toLowerCase(), hashedPassword, inviterId]
         );
         
         res.status(201).json({
             success: true,
-            message: 'Admin invited successfully',
-            admin: { id: result.insertId, username: username.trim(), email: email.trim().toLowerCase(), role: 'admin' }
+            message: 'Sub-admin invited successfully',
+            admin: { 
+                id: result.insertId, 
+                username: username.trim(), 
+                email: email.trim().toLowerCase(), 
+                role: 'admin',
+                invited_by: inviterId
+            }
         });
     } catch (e) {
         console.error('Admin invite error:', e);
         res.status(500).json({ success: false, message: 'Server error' });
     }
 });
+
+
+
+
+
+
+
+
+
 
 
 
