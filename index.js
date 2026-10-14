@@ -273,8 +273,9 @@ db.query('ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500) DEFAULT NULL
     if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('Error adding profile_picture column:', err);
 });
 
-db.query('ALTER TABLE users ADD COLUMN role ENUM("user","admin") NOT NULL DEFAULT "user"', (err) => {
+db.query('ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DEFAULT \'user\'', (err) => {
     if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('role:', err);
+    else console.log('role column ensured');
 });
 
 db.query(createUserTableQuery, (err) => {
