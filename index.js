@@ -278,15 +278,25 @@ db.query('ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DE
     else console.log('role column ensured');
 });
 
+// ──────────────── MIGRATIONS (Sequential) ────────────────
+// 1. Add invited_by column FIRST
 db.query('ALTER TABLE users ADD COLUMN invited_by INT NULL DEFAULT NULL', (err) => {
-    if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('invited_by column:', err);
-    else console.log('invited_by column ensured');
+    if (err && err.code !== 'ER_DUP_FIELDNAME') {
+        console.error('invited_by column:', err);
+    } else {
+        console.log('invited_by column ensured');
+        
+// 2. THEN add FK (inside callback = runs AFTER column)
+db.query('ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL', (err2) => {
+        if (err2 && err2.code !== 'ER_CANNOT_ADD_FOREIGN') {
+            console.error('fk_invited_by:', err2);
+        } else {
+            console.log('fk_invited_by ensured');
+        }
+    });
+}
 });
-
-// Add foreign key (optional, for integrity)
-db.query('ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL', (err) => {
-    if (err && err.code !== 'ER_CANNOT_ADD_FOREIGN') console.error('fk_invited_by:', err);
-});
+// ──────────────────────────────────────────────────────────
 
 db.query(createUserTableQuery, (err) => {
     if (err) console.error('Error creating users table:', err);
@@ -403,7 +413,7 @@ app.post('/super-admin/revoke/:id', requireSuperAdmin, async (req, res) => {
     }
     
     // Verify target is sub-admin (invited by requester)
-    const [target] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ? AND role = "admin"', [targetId]);
+    const [target] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ? AND role = \'admin\'', [targetId]);
     if (!target.length) {
         return res.status(404).json({ success: false, message: 'Admin not found' });
     }
