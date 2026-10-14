@@ -14,7 +14,6 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 //import multer from 'multer';
 import { upload } from './cloudinary.js';
-import { requireAdmin } from './filerole-middleware.js';
 import { requireAdmin, requireSuperAdmin } from './filerole-middleware.js';
 //import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
