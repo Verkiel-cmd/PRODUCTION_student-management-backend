@@ -15,6 +15,7 @@ import path from 'path';
 //import multer from 'multer';
 import { upload } from './cloudinary.js';
 import { requireAdmin } from './filerole-middleware.js';
+import { requireAdmin, requireSuperAdmin } from './filerole-middleware.js';
 //import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
@@ -320,11 +321,40 @@ db.query(createClasskernTableQuery, (err) => {
 
 
 
+// ──────────────── PERMANENT: Ensure first admin exists ────────────────
+async function ensureFirstAdmin() {
+    try {
+        const [admins] = await dbPromise.query('SELECT id FROM users WHERE role = "admin" LIMIT 1');
+        
+        if (admins.length === 0) {
+            const targetEmail = process.env.INITIAL_ADMIN_EMAIL || 'ezekielU675@gmail.com';
+            
+            const [result] = await dbPromise.query(
+                'UPDATE users SET role = "admin" WHERE email = ?', [targetEmail]
+            );
+            
+            if (result.affectedRows > 0) {
+                console.log(`First admin created: ${targetEmail}`);
+            } else {
+                console.log(`No user found with email: ${targetEmail}`);
+            }
+        } else {
+            console.log(`Admin already exists (${admins.length} admin(s))`);
+        }
+    } catch (error) {
+        console.error('ensureFirstAdmin error:', error.message);
+    }
+}
+
+ensureFirstAdmin();
+
+
+
 
 // ──────────────── SUPER ADMIN PANEL ENDPOINTS ────────────────
 
 // GET /super-admin/admins - List all admins with inviter info
-app.get('/super-admin/admins', requireAdmin, async (req, res) => {
+app.get('/super-admin/admins', requireSuperAdmin, async (req, res) => {
     const requesterId = req.session.userId;
     
     // Verify super admin
@@ -353,7 +383,7 @@ app.get('/super-admin/admins', requireAdmin, async (req, res) => {
 });
 
 // POST /super-admin/revoke/:id - Revoke admin status (super admin only)
-app.post('/super-admin/revoke/:id', requireAdmin, async (req, res) => {
+app.post('/super-admin/revoke/:id', requireSuperAdmin, async (req, res) => {
     const requesterId = req.session.userId;
     const targetId = parseInt(req.params.id);
     
@@ -398,7 +428,7 @@ app.post('/super-admin/revoke/:id', requireAdmin, async (req, res) => {
    Unauthorized changes will cause immediate system failure.
    ================================================ */
 
-app.post('/admin/invite', requireAdmin, authLimiter, async (req, res) => {
+app.post('/admin/invite', requireSuperAdmin, authLimiter, async (req, res) => {
     const { username, email, password } = req.body;
     const inviterId = req.session.userId; // Current admin's ID
     
