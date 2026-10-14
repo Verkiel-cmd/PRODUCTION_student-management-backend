@@ -312,6 +312,57 @@ db.query(createClasskernTableQuery, (err) => {
     if (err) console.error('Error creating classkern table:', err);
 });
 
+
+/* ------------------------------------------------
+   ⚠️  CORE SYSTEM LOGIC ⚠️
+   This block handles critical state management.
+   Unauthorized changes will cause immediate system failure.
+   ================================================ */
+
+app.post('/admin/invite', requireAdmin, authLimiter, async (req, res) => {
+    const { username, email, password } = req.body;
+    
+    if (!username?.trim() || !email?.trim() || !password) {
+        return res.status(400).json({ success: false, message: 'All fields required' });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
+    }
+    
+    try {
+        const [existing] = await dbPromise.query(
+            'SELECT * FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)',
+            [email, username]
+        );
+        if (existing.length) {
+            const emailExists = existing.some(u => u.email.toLowerCase() === email.toLowerCase());
+            return res.status(400).json({ 
+                success: false, 
+                message: emailExists ? 'Email already in use' : 'Username already taken' 
+            });
+        }
+        
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const [result] = await dbPromise.query(
+            'INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, "admin")',
+            [username.trim(), email.trim().toLowerCase(), hashedPassword]
+        );
+        
+        res.status(201).json({
+            success: true,
+            message: 'Admin invited successfully',
+            admin: { id: result.insertId, username: username.trim(), email: email.trim().toLowerCase(), role: 'admin' }
+        });
+    } catch (e) {
+        console.error('Admin invite error:', e);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+
+
+
+
 /* ------------------------------------------------
    ⚠️  CORE SYSTEM LOGIC ⚠️
    This block handles critical state management.
