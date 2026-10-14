@@ -278,6 +278,11 @@ db.query('ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DE
     else console.log('role column ensured');
 });
 
+db.query('ALTER TABLE users ADD COLUMN invited_by INT NULL DEFAULT NULL', (err) => {
+    if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('invited_by column:', err);
+    else console.log('invited_by column ensured');
+});
+
 // Add foreign key (optional, for integrity)
 db.query('ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL', (err) => {
     if (err && err.code !== 'ER_CANNOT_ADD_FOREIGN') console.error('fk_invited_by:', err);
@@ -323,13 +328,13 @@ db.query(createClasskernTableQuery, (err) => {
 // ──────────────── PERMANENT: Ensure first admin exists ────────────────
 async function ensureFirstAdmin() {
     try {
-        const [admins] = await dbPromise.query('SELECT id FROM users WHERE role = "admin" LIMIT 1');
+        const [admins] = await dbPromise.query('SELECT id FROM users WHERE role = \'admin\' LIMIT 1');
         
         if (admins.length === 0) {
             const targetEmail = process.env.INITIAL_ADMIN_EMAIL || 'ezekielU675@gmail.com';
             
             const [result] = await dbPromise.query(
-                'UPDATE users SET role = "admin" WHERE email = ?', [targetEmail]
+                'UPDATE users SET role = \'admin\' WHERE email = ?', [targetEmail]
             );
             
             if (result.affectedRows > 0) {
@@ -465,7 +470,7 @@ app.post('/admin/invite', requireSuperAdmin, authLimiter, async (req, res) => {
         
         const hashedPassword = await bcrypt.hash(password, 10);
         const [result] = await dbPromise.query(
-            'INSERT INTO users (username, email, password, role, invited_by) VALUES (?, ?, ?, "admin", ?)',
+            'INSERT INTO users (username, email, password, role, invited_by) VALUES (?, ?, ?, \'admin\', ?)',
             [username.trim(), email.trim().toLowerCase(), hashedPassword, inviterId]
         );
         
