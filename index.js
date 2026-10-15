@@ -860,11 +860,17 @@ app.post('/check-username', async (req, res) => {
 // PUT /update-username
 app.put('/update-username', async (req, res) => {
     if (!req.session || !req.session.userId) {
-        return res.status(401).json({ success: false, message: 'Unauthorized' });
+        return res.status(401).json({ 
+            success: false, 
+            message: 'Unauthorized' 
+        });
     }
     const { username } = req.body;
     if (!username || username.trim().length < 3) {
-        return res.status(400).json({ success: false, message: 'Username must be at least 3 characters' });
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Username must be at least 3 characters' 
+        });
     }
     try {
         const [existing] = await dbPromise.query(
@@ -872,24 +878,43 @@ app.put('/update-username', async (req, res) => {
             [username.trim(), req.session.userId]
         );
         if (existing.length > 0) {
-            return res.status(409).json({ success: false, message: 'Username already taken' });
+            return res.status(409).json({ 
+                success: false, 
+                message: 'Username already taken' 
+            });
         }
         await dbPromise.query('UPDATE users SET username = ? WHERE id = ?', [username.trim(), req.session.userId]);
+
         req.session.username = username.trim();
-        res.json({ success: true, message: 'Username updated' });
+        await new Promise((resolve, reject) => {
+            req.session.save(err => (err ? reject(err) : resolve ()));
+        })
+        res.json({ 
+            success: true, 
+            message: 'Username updated' 
+        });
+
     } catch (error) {
         console.error('Username update error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server error' 
+        });
     }
 });
 
 // POST /upload-profile-picture
 app.post('/upload-profile-picture', upload.single('profilePicture'), async (req, res) => {
     if (!req.session || !req.session.userId) {
-        return res.status(401).json({ success: false, message: 'Unauthorized' });
+        return res.status(401).json({ 
+            success: false, 
+            message: 'Unauthorized' });
     }
     if (!req.file) {
-        return res.status(400).json({ success: false, message: 'No file uploaded' });
+        return res.status(400).json({ 
+            success: false, 
+            message: 'No file uploaded' 
+        });
     }
     try {
         const pictureUrl = req.file.path;
