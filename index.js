@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 //import multer from 'multer';
 import { upload } from './cloudinary.js';
-import { requireAdmin, requireSuperAdmin } from './filerole-middleware.js';
+import { requireAdmin, requireSuperAdmin, requireLogin } from './filerole-middleware.js';
 //import { attempt } from 'lodash';
 // import { body, validationResult } from 'express-validator';  // ← uncomment when adding validation to CRUD routes
 
@@ -525,6 +525,20 @@ app.get('/', (req, res) => {
     res.send('Welcome to the Student Management API!');
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Registration
 app.post('/register', authLimiter, async (req, res) => {
     const { username, email, password } = req.body;
@@ -585,6 +599,9 @@ if (existingUsers.length > 0) {
         res.status(500).json({ success: false, message: 'Server error. Please try again later.' });
     }
 });
+
+
+
 // Login
 app.post('/login', authLimiter, async (req, res) => {
     const { email, password } = req.body;
@@ -797,6 +814,9 @@ app.post('/google-login', async (req, res) => {
     }
 });
 
+
+
+
 // Session info
 app.get('/session', (req, res) => {
     if (req.session.username) {
@@ -805,6 +825,12 @@ app.get('/session', (req, res) => {
         res.status(401).json({ message: 'Not logged in' });
     }
 });
+
+
+
+
+
+
 
 // Check username
 app.post('/check-username', async (req, res) => {
@@ -823,6 +849,13 @@ app.post('/check-username', async (req, res) => {
         res.status(500).json({ exists: false, message: 'Server error' });
     }
 });
+
+
+
+
+
+
+
 
 // PUT /update-username
 app.put('/update-username', async (req, res) => {
@@ -1388,7 +1421,7 @@ db.on('error', (err) => {
 // ===================
 
 // Get total students in classkern
-app.get('/class-students', (_req, res) => {
+app.get('/class-students', requireLogin, (_req, res) => {
     db.query('SELECT COUNT(*) AS total FROM classkern', (error, results) => {
         if (error) return res.status(500).json({ error: 'Database query failed' });
         res.json({ total: results[0].total });
@@ -1396,7 +1429,7 @@ app.get('/class-students', (_req, res) => {
 });
 
 // Get all classes
-app.get('/get-classes', (req, res) => {
+app.get('/get-classes', requireLogin, (req, res) => {
     db.query('SELECT * FROM classkern', (err, results) => {
         if (err) return res.status(500).json({ error: 'Failed to fetch classes', details: err.message });
         res.json(results);
@@ -1433,31 +1466,80 @@ app.post('/add-class', requireAdmin, (req, res) => {
 // Edit class
 app.put('/edit-class/:id', requireAdmin, (req, res) => {
     const { id } = req.params;
-    const { classname, classteacher, studentlimit } = req.body;
-    if (!id || isNaN(parseInt(id))) return res.status(400).json({ error: 'Invalid class ID' });
+    const { 
+        classname, 
+        classteacher, 
+        studentlimit 
+    } = req.body;
+
+    if (!id || isNaN(parseInt(id))) 
+        return res.status(400).json({ 
+          error: 'Invalid class ID' 
+    });
+
     const trimmedClassName = classname ? classname.trim() : '';
-    if (!trimmedClassName) return res.status(400).json({ error: 'Class name is required' });
-    if (trimmedClassName.length > 100) return res.status(400).json({ error: 'Class name is too long (max 100 characters)' });
+
+    if (!trimmedClassName) return res.status(400).json({ 
+        error: 'Class name is required' 
+    });
+
+    if (trimmedClassName.length > 100) return res.status(400).json({ 
+        error: 'Class name is too long (max 100 characters)' 
+    });
+
     const trimmedClassTeacher = classteacher ? classteacher.trim() : '';
-    if (!trimmedClassTeacher) return res.status(400).json({ error: 'Class teacher is required' });
-    if (trimmedClassTeacher.length > 100) return res.status(400).json({ error: 'Teacher name is too long (max 100 characters)' });
+
+    if (!trimmedClassTeacher) return res.status(400).json({ 
+        error: 'Class teacher is required' 
+    });
+
+    if (trimmedClassTeacher.length > 100) return res.status(400).json({ 
+        error: 'Teacher name is too long (max 100 characters)' 
+    });
+
     const parsedStudentLimit = parseInt(studentlimit);
     if (isNaN(parsedStudentLimit) || parsedStudentLimit < 1 || parsedStudentLimit > 1000) {
-        return res.status(400).json({ error: 'Student limit must be a number between 1 and 1000' });
+        return res.status(400).json({ 
+            error: 'Student limit must be a number between 1 and 1000' 
+        });
     }
+
     const duplicateCheckQuery = `
       SELECT classid FROM classkern 
       WHERE classname = ? AND classteacher = ? AND classid != ?`;
+
     db.query(duplicateCheckQuery, [trimmedClassName, trimmedClassTeacher, id], (dupErr, dupResults) => {
-        if (dupErr) return res.status(500).json({ error: 'Error checking for duplicate classes', details: dupErr.message });
-        if (dupResults.length > 0) return res.status(409).json({ error: 'A class with the same name and teacher already exists', duplicateClassId: dupResults[0].classid });
+
+        if (dupErr) return res.status(500).json({ 
+            error: 'Error checking for duplicate classes', 
+            details: dupErr.message 
+        });
+
+        if (dupResults.length > 0) return res.status(409).json({ 
+            error: 'A class with the same name and teacher already exists', 
+            duplicateClassId: dupResults[0].classid 
+        });
+
         const checkExistQuery = 'SELECT * FROM classkern WHERE classid = ?';
+
         db.query(checkExistQuery, [id], (checkErr, checkResults) => {
-            if (checkErr) return res.status(500).json({ error: 'Error checking class existence', details: checkErr.message });
-            if (checkResults.length === 0) return res.status(404).json({ error: 'Class not found' });
+            if (checkErr) return res.status(500).json({ 
+                error: 'Error checking class existence', 
+                details: checkErr.message 
+            });
+
+            if (checkResults.length === 0) return res.status(404).json({ 
+                error: 'Class not found' 
+            });
+
             const updateQuery = 'UPDATE classkern SET classname = ?, classteacher = ?, studentlimit = ? WHERE classid = ?';
+
             db.query(updateQuery, [trimmedClassName, trimmedClassTeacher, parsedStudentLimit, id], (err, result) => {
-                if (err) return res.status(500).json({ error: 'Error updating data in the database', details: err.message });
+                if (err) return res.status(500).json({ 
+                    error: 'Error updating data in the database', 
+                    details: err.message 
+                });
+
                 if (result.affectedRows === 0) return res.status(500).json({ error: 'Failed to update class' });
                 res.json({
                     message: 'Class updated successfully!',
@@ -1479,9 +1561,19 @@ app.delete('/delete-class/:id', requireAdmin, (req, res) => {
     if (!id || isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
     const query = 'DELETE FROM classkern WHERE classid = ?';
     db.query(query, [id], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Error deleting data from the database', details: err.message });
-        if (result.affectedRows === 0) return res.status(404).json({ error: 'Class not found' });
-        res.json({ message: 'Class deleted successfully!', deletedClassId: id });
+        if (err) return res.status(500).json({ 
+            error: 'Error deleting data from the database', 
+            details: err.message 
+        });
+
+        if (result.affectedRows === 0) return res.status(404).json({ 
+            error: 'Class not found' 
+        });
+
+        res.json({ 
+            message: 'Class deleted successfully!', 
+            deletedClassId: id 
+        });
     });
 });
 
@@ -1490,7 +1582,7 @@ app.delete('/delete-class/:id', requireAdmin, (req, res) => {
 // ===================
 
 // Get total students in studentawt
-app.get('/total-students', (_req, res) => {
+app.get('/total-students', requireLogin, (_req, res) => {
     db.query('SELECT COUNT(*) AS total FROM studentawt', (error, results) => {
         if (error) return res.status(500).json({ error: 'Database query failed' });
         res.json({ total: results[0].total });
@@ -1498,7 +1590,7 @@ app.get('/total-students', (_req, res) => {
 });
 
 // Get all students (with search)
-app.get('/students', (req, res) => {
+app.get('/students', requireLogin, (req, res) => {
     const searchTerm = req.query.search ? `%${req.query.search}%` : '%';
     const sql = 'SELECT * FROM studentawt WHERE name LIKE ? OR email LIKE ?';
     db.query(sql, [searchTerm, searchTerm], (err, results) => {
@@ -1508,7 +1600,7 @@ app.get('/students', (req, res) => {
 });
 
 // Get student by ID
-app.get('/students/:id', (req, res) => {
+app.get('/students/:id', requireLogin, (req, res) => {
     const id = req.params.id;
     const sql = 'SELECT * FROM studentawt WHERE id = ?';
     db.query(sql, [id], (error, results) => {
@@ -1558,7 +1650,10 @@ app.put('/students/:id', requireAdmin, (req, res) => {
           FROM studentawt 
           WHERE (email = ? OR phone = ?) AND id != ?`;
         db.query(duplicateCheckQuery, [trimmedEmail, trimmedPhone, id], (dupErr, dupResults) => {
-            if (dupErr) return res.status(500).json({ message: 'Error checking for duplicate students' });
+            if (dupErr) return res.status(500).json({ 
+                message: 'Error checking for duplicate students' 
+            });
+
             if (dupResults.length > 0) {
                 const duplicateEntries = dupResults.map(entry => ({
                     id: entry.id,
@@ -1572,8 +1667,14 @@ app.put('/students/:id', requireAdmin, (req, res) => {
             }
             const updateSql = 'UPDATE studentawt SET name = ?, email = ?, phone = ?, address = ? WHERE id = ?';
             db.query(updateSql, [trimmedName, trimmedEmail, trimmedPhone, trimmedAddress, id], (err, result) => {
-                if (err) return res.status(500).json({ message: 'Error updating student' });
-                if (result.affectedRows === 0) return res.status(404).json({ message: 'Student not found or no changes made' });
+                if (err) return res.status(500).json({ 
+                    message: 'Error updating student' 
+                });
+
+                if (result.affectedRows === 0) return res.status(404).json({ 
+                    message: 'Student not found or no changes made' 
+                });
+
                 res.json({
                     message: 'Student updated successfully',
                     updatedStudent: {

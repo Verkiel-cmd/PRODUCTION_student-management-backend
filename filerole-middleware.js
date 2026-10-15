@@ -1,5 +1,18 @@
 import { dbPromise } from './config.js';
 
+
+// Any logged-in user (read-only access)
+export async function requireLogin(req, res, next) {
+    if (!req.session || !req.session.userId) {
+        return res.status(401).json({ 
+            success: false, 
+            message: 'Please log in' 
+        });
+    }
+    next();
+}
+
+
 export async function requireAdmin(req, res, next) {
     if (!req.session || !req.session.userId) {
         return res.status(401).json({ 
