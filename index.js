@@ -415,18 +415,30 @@ app.post('/super-admin/revoke/:id', requireSuperAdmin, async (req, res) => {
     // Verify target is sub-admin (invited by requester)
     const [target] = await dbPromise.query('SELECT invited_by FROM users WHERE id = ? AND role = \'admin\'', [targetId]);
     if (!target.length) {
-        return res.status(404).json({ success: false, message: 'Admin not found' });
+        return res.status(404).json({ 
+            success: false, 
+            message: 'Admin not found' 
+        });
     }
     if (target[0].invited_by !== requesterId) {
-        return res.status(403).json({ success: false, message: 'Can only revoke admins you invited' });
+        return res.status(403).json({ 
+            success: false, 
+            message: 'Can only revoke admins you invited' 
+        });
     }
     
     try {
         await dbPromise.query('UPDATE users SET role = "user", invited_by = NULL WHERE id = ?', [targetId]);
-        res.json({ success: true, message: 'Admin revoked successfully' });
+        res.json({ 
+            success: true, 
+            message: 'Admin revoked successfully' 
+        });
     } catch (e) {
         console.error('Revoke admin error:', e);
-        res.status(500).json({ success: false, message: 'Server error' });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server error' 
+        });
     }
 });
 
@@ -456,14 +468,38 @@ app.post('/admin/invite', requireSuperAdmin, authLimiter, async (req, res) => {
             message: 'Only super admin can invite new admins' 
         });
     }
+
+    
     
     // ... rest of validation (same as before)
     if (!username?.trim() || !email?.trim() || !password) {
-        return res.status(400).json({ success: false, message: 'All fields required' });
+    
+        return res.status(400).json({ 
+            success: false, 
+            message: 'All fields required' 
+        });
     }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        return res.status(400).json({ 
+            success:false, 
+            message:'Invalid email' 
+    });
+
     if (password.length < 8) {
-        return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
+
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Password must be at least 8 characters' 
+        });
     }
+
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) ||
+        !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password))
+        return res.status(400).json({ 
+            success:false, 
+            message:'Password must contain upper, lower, number, and symbol' 
+        });
     
     try {
         const [existing] = await dbPromise.query(
@@ -502,7 +538,55 @@ app.post('/admin/invite', requireSuperAdmin, authLimiter, async (req, res) => {
 });
 
 
+//PROMOTION SUB ADMIN EXISTING USERS
+app.post('/admin/promote', requireSuperAdmin, async (req, res) => {
+    const {email} = req.body;
+    const inviterId = req.session.userId;
 
+    try {
+        const [rows] = await dbPromise.query(
+            'SELECT id, username, role FROM users WHERE LOWER(email) = LOWER(?)',
+            [email]
+        );
+        if (rows.length === 0)
+            return res.status(404).json({
+        success:false, 
+        message: 'No user with that email'
+    });
+    
+    const user = rows[0];
+
+    if (user.role !== 'user')
+        return res.status(409).json({
+        
+        success:false,
+        message: 'Already an admin or higher'
+    });
+
+    await dbPromise.query(
+        'UPDATE users SET role=?, invited_by=? WHERE id=?',
+        ['admin', inviterId, user.id]
+    );
+
+    res.status(200).json({
+        success:true,
+        message: 'Promoted Successfully',
+        admin: {
+            id: user.id,
+            username: user.username,
+            email,
+            role: 'admin',
+            invited_by:inviterId
+        }
+    });
+} catch (e) {
+    console.error(e);
+    res.status(500).json({
+        success:false,
+        message:'Server error'
+    });
+}
+});
 
 
 
