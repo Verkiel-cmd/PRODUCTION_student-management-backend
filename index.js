@@ -1837,6 +1837,28 @@ app.get('/api/user-details', async (req, res) => {
 });
 
 
+app.get('/notification', requireLogin, async (req, res) => {
+  try {
+    const limit = Math.min(100, parseInt(req.query.limit) || 20);
+    const sql = `
+      SELECT 'student' AS type, name AS title, created_at AS createdAt FROM studentawt
+      UNION ALL
+      SELECT 'class' AS type, classname AS title, created_at AS createdAt FROM classkern
+      ORDER BY createdAt DESC
+      LIMIT ?
+    `;
+    const [rows] = await dbPromise.query(sql, [limit]);
+    const notifications = rows.map((r) => ({
+      type: r.type,
+      message: r.type === 'student' ? `New student added: ${r.title}` : `New class created: ${r.title}`,
+      createdAt: r.createdAt,
+    }));
+    res.json({ success: true, count: notifications.length, data: notifications });
+  } catch (e) {
+    console.error('Notification fetch error:', e);
+    res.status(500).json({ success: false, error: 'Failed to load notifications.' });
+  }
+});
 
 // ===================
 // START SERVER
