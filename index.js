@@ -224,10 +224,8 @@ const sessionStore = new MySQLStore({
     clearExpired: true,
     checkExpirationInterval: 900000,
     expiration: 86400000,
-    ssl: {
-        ca: fs.readFileSync('./databases/certs/isgrootx1.pem'),
-        minVersion: 'TLSv1.2',
-        rejectUnauthorized: true
+    ssl: { 
+        minVersion: 'TLSv1.2' 
     },
 });
 
@@ -240,10 +238,8 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     store: sessionStore,
-    ssl: {
-        ca: fs.readFileSync('./databases/certs/isgrootx1.pem'),
-        minVersion: 'TLSv1.2',
-        rejectUnauthorized: true
+    ssl: { 
+        minVersion: 'TLSv1.2' 
     },
     cookie: {
         secure: process.env.NODE_ENV === 'production',
