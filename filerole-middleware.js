@@ -45,25 +45,28 @@ export async function requireSuperAdmin(req, res, next) {
         });
     }
     try {
-        const [rows] = await dbPromise.query('SELECT role, invited_by FROM users WHERE id = ?', [req.session.userId]);
+        const [rows] = await dbPromise.query('SELECT role, invited_by, email FROM users WHERE id = ?', [req.session.userId]);
+        const configuredEmail = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
         const user = rows[0];
-        if (!user || user.role !== 'admin') {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'Admin access required' 
+
+        if (
+            !configuredEmail ||
+            !user ||
+            user.role !== 'admin' ||
+            user.invited_by !== null ||
+            user.email.trim().toLowerCase() !== configuredEmail
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: 'Super admin only'
             });
         }
-        if (user.invited_by) {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'Super admin only' 
-            });
-        }
+
         next();
     } catch (e) {
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error' 
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
         });
     }
 }

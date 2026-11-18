@@ -306,41 +306,34 @@ CREATE TABLE IF NOT EXISTS users (
 
 await dbPromise.query(createUserTableQuery);
 
+const configuredSuperAdminEmail =
+    process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
+
+async function promoteConfiguredSuperAdmin(userId, email) {
+    if (
+        !configuredSuperAdminEmail ||
+        !email ||
+        email.trim().toLowerCase() !== configuredSuperAdminEmail
+    ) {
+        return false;
+    }
+
+    await dbPromise.query(
+        'UPDATE users SET role = \'admin\', invited_by = NULL WHERE id = ?',
+        [userId]
+    );
+
+    return true;
+}
+
+
 //profile_picture column if it doesn't exist
 // AFTER:
 db.query('ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500) DEFAULT NULL', (err) => {
     if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('Error adding profile_picture column:', err);
 });
 
-db.query('ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DEFAULT \'user\'', (err) => {
-    if (err && err.code !== 'ER_DUP_FIELDNAME') {
-        console.error('role:', err);
-        return;
-    }
 
-    console.log('role column ensured');
-    ensureFirstAdmin();
-});
-
-// ──────────────── MIGRATIONS (Sequential) ────────────────
-// 1. Add invited_by column FIRST
-db.query('ALTER TABLE users ADD COLUMN invited_by INT NULL DEFAULT NULL', (err) => {
-    if (err && err.code !== 'ER_DUP_FIELDNAME') {
-        console.error('invited_by column:', err);
-    } else {
-        console.log('invited_by column ensured');
-        
-// 2. THEN add FK (inside callback = runs AFTER column)
-db.query('ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL', (err2) => {
-        if (err2 && err2.code !== 'ER_CANNOT_ADD_FOREIGN') {
-            console.error('fk_invited_by:', err2);
-        } else {
-            console.log('fk_invited_by ensured');
-        }
-    });
-}
-});
-// ──────────────────────────────────────────────────────────
 
 
 // Create studentawt table if not exists "ListStud"
@@ -378,28 +371,64 @@ db.query(createClasskernTableQuery, (err) => {
 
 // ──────────────── PERMANENT: Ensure first admin exists ────────────────
 async function ensureFirstAdmin() {
-    try {
-        const [admins] = await dbPromise.query('SELECT id FROM users WHERE role = \'admin\' LIMIT 1');
-        
-        if (admins.length === 0) {
-            const targetEmail = process.env.INITIAL_ADMIN_EMAIL || 'ezekielU675@gmail.com';
-            
-            const [result] = await dbPromise.query(
-                'UPDATE users SET role = \'admin\' WHERE email = ?', [targetEmail]
-            );
-            
-            if (result.affectedRows > 0) {
-                console.log(`First admin created: ${targetEmail}`);
-            } else {
-                console.log(`No user found with email: ${targetEmail}`);
+    if (!configuredSuperAdminEmail) {
+        console.error('INITIAL_ADMIN_EMAIL is not set');
+        return;
+    }
+
+    const [users] = await dbPromise.query(
+        'SELECT id, email FROM users WHERE LOWER(email) = ? LIMIT 1',
+        [configuredSuperAdminEmail]
+    );
+
+    if (users.length === 0) {
+        console.log(`No user found with email: ${configuredSuperAdminEmail}`);
+        return;
+    }
+
+    await promoteConfiguredSuperAdmin(users[0].id, users[0].email);
+    console.log(`Configured superadmin ensured: ${users[0].email}`);
+}
+
+async function ensureRoleSchema() {
+    const columnMigrations = [
+        'ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DEFAULT \'user\'',
+        'ALTER TABLE users ADD COLUMN invited_by INT NULL DEFAULT NULL'
+    ];
+
+    for (const migration of columnMigrations) {
+        try {
+            await dbPromise.query(migration);
+        } catch (error) {
+            if (error.code !== 'ER_DUP_FIELDNAME') {
+                throw error;
             }
-        } else {
-            console.log(`Admin already exists (${admins.length} admin(s))`);
         }
+    }
+
+    try {
+        await dbPromise.query(
+            'ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL'
+        );
     } catch (error) {
-        console.error('ensureFirstAdmin error:', error.message);
+        if (
+            error.code === 'ER_FK_DUP_NAME' ||
+            error.code === 'ER_DUP_KEYNAME'
+        ) {
+            return;
+        }
+
+        if (error.code === 'ER_CANNOT_ADD_FOREIGN') {
+            console.error('Could not add fk_invited_by:', error.message);
+            return;
+        }
+
+        throw error;
     }
 }
+
+await ensureRoleSchema();
+await ensureFirstAdmin();
 
 
 
@@ -691,6 +720,9 @@ if (existingUsers.length > 0) {
             'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
             [username, email, hashedPassword]
         );
+
+        await promoteConfiguredSuperAdmin(result.insertId, email);
+
         req.session.userId = result.insertId;
         req.session.username = username;
         req.session.email = email;
@@ -738,12 +770,23 @@ app.post('/login', authLimiter, async (req, res) => {
             });
         }
         const user = users[0];
+
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({
                 success: false,
                 messagePassword: 'Invalid password',
                 field: 'password'
+            });
+        }
+
+        const promoted = await promoteConfiguredSuperAdmin(user.id, user.email);
+        if (!isMatch) {
+            return res.status(400).json({
+                success: false,
+                messagePassword: 'Invalid password',
+                field: 'password',
+                role: promoted ? 'admin' : user.role,
             });
         }
         req.session.userId = user.id;
@@ -766,7 +809,7 @@ app.post('/login', authLimiter, async (req, res) => {
             message: 'Login successful',
             userId: user.id,
             username: user.username,
-            role: user.role,
+            role: promoted ? 'admin' : user.role,
             redirectUrl: '/Student_lists/ListStud'
         });
     } catch (error) {
@@ -807,6 +850,17 @@ app.get('/auth/validate', async (req, res) => {
         authenticated: false, 
         user: null 
     });
+
+    const promoted = await promoteConfiguredSuperAdmin(
+    rows[0].id,
+    rows[0].email
+    );
+
+    if (promoted) {
+    rows[0].role = 'admin';
+
+    }
+
     res.json({ 
         authenticated: true, user: rows[0] 
     });
@@ -872,7 +926,9 @@ app.post('/google-login', async (req, res) => {
                     'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
                     [username, email, '']
                 );
-                
+
+                const promoted = await promoteConfiguredSuperAdmin(result.insertId, email);
+
                 // Set up session
                 req.session.userId = result.insertId;
                 req.session.username = username;
@@ -891,13 +947,15 @@ app.post('/google-login', async (req, res) => {
                     userId: result.insertId,
                     username: username,
                     email: email,
-                    role: 'user',
+                    role: promoted ? 'admin' : 'user',
                     picture: picture,
                     redirectUrl: '/Student_lists/ListStud'
                 });
+
             } else {
                 // Existing user - set up session
                 const user = users[0];
+                const promoted = await promoteConfiguredSuperAdmin(user.id, user.email);
                 req.session.userId = user.id;
                 req.session.username = user.username;
                 
@@ -914,7 +972,7 @@ app.post('/google-login', async (req, res) => {
                     userId: user.id,
                     username: user.username,
                     email: user.email,
-                    role: user.role,
+                    role: promoted ? 'admin' : user.role,
                     picture: picture,
                     redirectUrl: '/Student_lists/ListStud'
                 });
