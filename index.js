@@ -220,7 +220,7 @@ app.use((req, res, next) => {
 
 
 
-// --- TiDB startup: create the application database before opening app connections ---
+// --- TiDB startup create the application database before opening app connections
 const dbName = process.env.DB_NAME;
 
 if (!dbName || !/^[A-Za-z0-9_]+$/.test(dbName)) {
@@ -246,35 +246,21 @@ try {
 
 // --- MySQL Connection ---
 const db = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: process.env.MYSQLPORT || process.env.MYSQLPORT || 53382,
+    ...connectionOptions,
+    database: dbName,
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0,
-    ssl: { 
-        minVersion: 'TLSv1.2' 
-    }
+    queueLimit: 0
 });
 const dbPromise = db.promise();
 
 // --- Session Store ---
 const MySQLStore = MySQLSession(session);
 const sessionStore = new MySQLStore({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: process.env.MYSQLPORT || process.env.MYSQLPORT || 53382,
     clearExpired: true,
     checkExpirationInterval: 900000,
-    expiration: 86400000,
-    ssl: { 
-        minVersion: 'TLSv1.2' 
-    },
-});
+    expiration: 86400000
+}, db);
 
 // Add this line BEFORE app.use(session(...))
 app.set('trust proxy', 1);
@@ -285,9 +271,6 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     store: sessionStore,
-    ssl: { 
-        minVersion: 'TLSv1.2' 
-    },
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
@@ -321,6 +304,8 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )`;
 
+await dbPromise.query(createUserTableQuery);
+
 //profile_picture column if it doesn't exist
 // AFTER:
 db.query('ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500) DEFAULT NULL', (err) => {
@@ -328,8 +313,13 @@ db.query('ALTER TABLE users ADD COLUMN profile_picture VARCHAR(500) DEFAULT NULL
 });
 
 db.query('ALTER TABLE users ADD COLUMN role ENUM(\'user\',\'admin\') NOT NULL DEFAULT \'user\'', (err) => {
-    if (err && err.code !== 'ER_DUP_FIELDNAME') console.error('role:', err);
-    else console.log('role column ensured');
+    if (err && err.code !== 'ER_DUP_FIELDNAME') {
+        console.error('role:', err);
+        return;
+    }
+
+    console.log('role column ensured');
+    ensureFirstAdmin();
 });
 
 // ──────────────── MIGRATIONS (Sequential) ────────────────
@@ -352,9 +342,6 @@ db.query('ALTER TABLE users ADD CONSTRAINT fk_invited_by FOREIGN KEY (invited_by
 });
 // ──────────────────────────────────────────────────────────
 
-db.query(createUserTableQuery, (err) => {
-    if (err) console.error('Error creating users table:', err);
-});
 
 // Create studentawt table if not exists "ListStud"
 const createStudentawtTableQuery = `
@@ -413,8 +400,6 @@ async function ensureFirstAdmin() {
         console.error('ensureFirstAdmin error:', error.message);
     }
 }
-
-ensureFirstAdmin();
 
 
 
