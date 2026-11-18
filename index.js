@@ -209,7 +209,10 @@ const db = mysql.createPool({
     port: process.env.MYSQLPORT || process.env.MYSQLPORT || 53382,
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    ssl: { 
+        minVersion: 'TLSv1.2' 
+    }
 });
 const dbPromise = db.promise();
 
