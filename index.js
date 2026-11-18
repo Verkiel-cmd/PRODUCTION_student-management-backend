@@ -200,6 +200,50 @@ app.use((req, res, next) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// --- TiDB startup: create the application database before opening app connections ---
+const dbName = process.env.DB_NAME;
+
+if (!dbName || !/^[A-Za-z0-9_]+$/.test(dbName)) {
+    throw new Error('DB_NAME must contain only letters, numbers, and underscores');
+}
+
+const connectionOptions = {
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    port: Number(process.env.MYSQLPORT),
+    ssl: { minVersion: 'TLSv1.2' }
+};
+
+// Connect without selecting a database, then create it if needed.
+const bootstrapDb = mysql.createConnection(connectionOptions).promise();
+try {
+    await bootstrapDb.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+} finally {
+    await bootstrapDb.end();
+}
+
+
 // --- MySQL Connection ---
 const db = mysql.createPool({
     host: process.env.DB_HOST,
