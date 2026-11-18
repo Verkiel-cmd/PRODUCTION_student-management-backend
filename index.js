@@ -223,6 +223,10 @@ const sessionStore = new MySQLStore({
     clearExpired: true,
     checkExpirationInterval: 900000,
     expiration: 86400000,
+    ssl: {
+        minVersion: 'TLSv1.2',
+    },
+    
 });
 
 // Add this line BEFORE app.use(session(...))
@@ -234,6 +238,9 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     store: sessionStore,
+    ssl: {
+        minVersion: 'TLSv1.2',
+    },
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
