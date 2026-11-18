@@ -781,14 +781,7 @@ app.post('/login', authLimiter, async (req, res) => {
         }
 
         const promoted = await promoteConfiguredSuperAdmin(user.id, user.email);
-        if (!isMatch) {
-            return res.status(400).json({
-                success: false,
-                messagePassword: 'Invalid password',
-                field: 'password',
-                role: promoted ? 'admin' : user.role,
-            });
-        }
+
         req.session.userId = user.id;
         req.session.username = user.username;
         req.session.email = email;
